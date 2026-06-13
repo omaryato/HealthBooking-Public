@@ -1,4 +1,3 @@
-
 <template>
   <div>
     <nav class="navbar navbar-light bg-white shadow-sm mb-4">
@@ -13,6 +12,7 @@
         <div class="card-header">
           <h5 class="mb-0">Appointments</h5>
         </div>
+
         <div class="card-body p-0">
           <table class="table table-bordered table-striped mb-0">
             <thead class="table-light">
@@ -24,14 +24,25 @@
                 <th>Update</th>
               </tr>
             </thead>
+
             <tbody>
+              <tr v-if="appointments.length === 0">
+                <td colspan="5" class="text-center p-3">
+                  No appointments found.
+                </td>
+              </tr>
+
               <tr v-for="appointment in appointments" :key="appointment.appointmentId">
                 <td>{{ appointment.patientName }}</td>
                 <td>{{ appointment.symptoms }}</td>
                 <td>{{ appointment.slot }}</td>
                 <td>{{ appointment.status }}</td>
                 <td>
-                  <select class="form-select" :value="appointment.status" @change="e => updateStatus(appointment, e.target.value)">
+                  <select
+                    class="form-select"
+                    :value="appointment.status"
+                    @change="e => updateStatus(appointment, e.target.value)"
+                  >
                     <option>Pending</option>
                     <option>In Progress</option>
                     <option>Completed</option>
@@ -41,42 +52,74 @@
             </tbody>
           </table>
         </div>
+
       </div>
     </div>
   </div>
 </template>
 
 <script>
+const API_BASE_URL = "https://my60hlfa5k.execute-api.eu-north-1.amazonaws.com";
+
 export default {
   name: "AppointmentsList",
+
   data() {
     return {
       appointments: []
     };
   },
+
   mounted() {
     this.fetchAppointments();
   },
+
   methods: {
+    parseApiResponse(data) {
+      // This handles both cases:
+      // 1. API returns the array directly
+      // 2. API returns { body: "..." }
+      if (Array.isArray(data)) {
+        return data;
+      }
+
+      if (data && data.body) {
+        return JSON.parse(data.body);
+      }
+
+      return [];
+    },
+
     fetchAppointments() {
-      fetch("https://e2m2b7y8c9.execute-api.us-east-1.amazonaws.com/prod/appointments")
-        .then(res => res.json())
+      fetch(`${API_BASE_URL}/appointments`)
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error: ${res.status}`);
+          }
+          return res.json();
+        })
         .then(data => {
-          const parsed = JSON.parse(data.body);
-          this.appointments = parsed;
+          this.appointments = this.parseApiResponse(data);
+        })
+        .catch(err => {
+          console.error("Failed to load appointments:", err);
+          alert("Failed to load appointments.");
         });
     },
+
     updateStatus(appointment, newStatus) {
-      // Log the full appointment object and its ID
-      console.log(" appointment (proxy):", appointment);
-      const cleanAppointment = JSON.parse(JSON.stringify(appointment));
-      console.log(" Clean appointment:", cleanAppointment);
-      console.log("appointmentId:", cleanAppointment.appointmentId);
-      console.log(" appointmentId (direct):", appointment.appointmentId);
+      const appointmentId = appointment.appointmentId;
 
-      const url = `https://e2m2b7y8c9.execute-api.us-east-1.amazonaws.com/prod/appointments/${appointment.appointmentId}`;
+      if (!appointmentId) {
+        alert("Appointment ID is missing.");
+        return;
+      }
 
-      const payload = { status: newStatus };
+      const url = `${API_BASE_URL}/appointments/${appointmentId}`;
+
+      const payload = {
+        status: newStatus
+      };
 
       fetch(url, {
         method: "PATCH",
@@ -85,25 +128,29 @@ export default {
         },
         body: JSON.stringify(payload)
       })
-          .then(async res => {
+        .then(async res => {
+          const rawBody = await res.text();
 
-            const rawBody = await res.text();
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${rawBody}`);
+          }
 
-            if (!res.ok) {
-              throw new Error(`HTTP ${res.status}: ${rawBody}`);
-            }
+          return rawBody ? JSON.parse(rawBody) : {};
+        })
+        .then(() => {
+          alert("Status updated!");
 
-            return JSON.parse(rawBody);
-          })
-          .then(() => {
-            alert("Status updated!");
-          })
-          .catch(err => {
-            console.error(" Failed to update status:", err);
-            alert("Update failed. See console for details.");
-          });
+          // Update the table immediately without waiting
+          appointment.status = newStatus;
+
+          // Also reload from DynamoDB to make sure data is synced
+          this.fetchAppointments();
+        })
+        .catch(err => {
+          console.error("Failed to update status:", err);
+          alert("Update failed. See console for details.");
+        });
     }
-
-     }
+  }
 };
 </script>
